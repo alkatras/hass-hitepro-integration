@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1 (2026-08-23)
+
+### Fixed
+
+- **Pushbutton events never firing**: The `event`-domain `value_template` for pushbutton controls rendered a bare `press`/`release` word, but Home Assistant's MQTT event platform requires the templated payload to be JSON with an `event_type` key. Every message was silently discarded as invalid JSON, so `event.*` pushbutton entities stayed stuck on `unknown` forever regardless of real button presses. The template now renders `{"event_type": "press"}` / `{"event_type": "release"}`.
+
 ## 1.2.0 (2026-08-17)
 
 ### Added
