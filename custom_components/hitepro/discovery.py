@@ -213,10 +213,14 @@ def _make_entity(
         payload["state_topic"] = state_topic
         payload["event_types"] = ["press", "release"]
         payload["device_class"] = "button"
+        press_payload = json.dumps({"event_type": "press"})
+        release_payload = json.dumps({"event_type": "release"})
         payload["value_template"] = (
             "{% if value|string in ['1', 'true', 'True', 'ON', 'on'] %}"
-            "press"
-            "{% else %}release{% endif %}"
+            f"{press_payload}"
+            "{% else %}"
+            f"{release_payload}"
+            "{% endif %}"
         )
 
     elif ha_domain == "light" and wb_type == "range":
