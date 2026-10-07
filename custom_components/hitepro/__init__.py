@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import timedelta
 
@@ -23,6 +24,7 @@ from .discovery import (
 )
 
 from .discovery import CLEANUP_VERSION
+from .state_filter import LED3SStateFilter, is_filtered_control
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,17 +33,24 @@ PLATFORMS: list[str] = []
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {"entities": [], "unsub": None, "cleanup_version": 0}
+    hass.data[DOMAIN][entry.entry_id] = {
+        "entities": [],
+        "unsub": None,
+        "cleanup_version": 0,
+        "periodic_reload_done": False,
+        "state_filter": LED3SStateFilter(hass),
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     async def handle_refresh(call: ServiceCall) -> None:
         for entry_item in hass.config_entries.async_entries(DOMAIN):
-            await _async_refresh_entry(hass, entry_item)
+            await _async_refresh_entry(hass, entry_item, force_reload=True)
 
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, handle_refresh)
 
     await _async_refresh_entry(hass, entry)
+    await hass.data[DOMAIN][entry.entry_id]["state_filter"].async_start()
     _start_refresh_timer(hass, entry)
 
     entry.async_on_unload(
@@ -60,6 +69,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unsub = data.get("unsub")
     if unsub:
         unsub()
+
+    state_filter: LED3SStateFilter | None = data.get("state_filter")
+    if state_filter:
+        state_filter.async_stop()
 
     entities: list[HiteEntity] = data.get("entities", [])
     await async_remove_discovery(hass, entities)
@@ -83,7 +96,7 @@ def _start_refresh_timer(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     async def _timer_callback(_now):
         _LOGGER.info("Timer fired for %s", entry.entry_id)
-        await _async_refresh_entry(hass, entry)
+        await _async_refresh_entry(hass, entry, periodic=True)
 
     unsub = async_track_time_interval(
         hass,
@@ -93,7 +106,17 @@ def _start_refresh_timer(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.data[DOMAIN][entry.entry_id]["unsub"] = unsub
 
 
-async def _async_refresh_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def _entities_signature(entities: list[HiteEntity]) -> dict[tuple[str, str], str]:
+    return {(e.domain, e.object_id): json.dumps(e.config, sort_keys=True, ensure_ascii=False) for e in entities}
+
+
+async def _async_refresh_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    periodic: bool = False,
+    force_reload: bool = False,
+) -> None:
     _LOGGER.info("Refreshing entry %s", entry.entry_id)
     url: str = entry.data.get(CONF_URL, "")
     api_key: str = entry.data.get(CONF_API_KEY, "")
@@ -138,8 +161,24 @@ async def _async_refresh_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     await async_publish_discovery(hass, new_entities)
 
-    if old_entities:
+    state_filter: LED3SStateFilter | None = data_store.get("state_filter")
+    if state_filter:
+        state_filter.set_channels(
+            e.control_id for e in new_entities if e.domain == "light" and is_filtered_control(e.control_id)
+        )
+
+    # Reload makes the gateway dump its cache, and that cache lies about
+    # Relay-LED3S levels. Send it only when the device set or a discovery
+    # config changed, on the first periodic refresh after start (initial
+    # state sync, as before), or when the refresh service asks for it.
+    changed = _entities_signature(old_entities) != _entities_signature(new_entities)
+    first_periodic = periodic and not data_store.get("periodic_reload_done", False)
+    if old_entities and (force_reload or changed or first_periodic):
         await async_trigger_reload(hass)
+        if periodic:
+            data_store["periodic_reload_done"] = True
+    elif old_entities:
+        _LOGGER.debug("Nothing changed, gateway Reload skipped")
 
     hass.data[DOMAIN][entry.entry_id]["entities"] = new_entities
     if cleanup_entities:

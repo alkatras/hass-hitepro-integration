@@ -28,7 +28,7 @@ Automatically discovers HiTE PRO gateways on your network and creates all their 
 
 1. Install [HACS][hacs-download] if you don't have it yet
 2. In HACS, go to **Integrations → ⋮ → Custom Repositories**
-3. Add `https://github.com/illmouse/hass-hitepro-integration` as an **Integration** repository
+3. Add `https://github.com/alkatras/hass-hitepro-integration` as an **Integration** repository (this fork carries the Relay-LED3S state fix; upstream is `illmouse/hass-hitepro-integration`)
 4. Search for `HiTE PRO` in HACS and click **Download**
 5. Restart Home Assistant
 
@@ -80,6 +80,7 @@ Lights created this way support on/off commands. For brightness and color contro
 - Devices are refreshed every **5 minutes** by default (minimum 60 seconds)
 - Change the interval in **Settings → Devices & Services → HiTE PRO → Configure**
 - Manual refresh: call the `hitepro.refresh_devices` service
+- A periodic refresh sends the gateway `Reload` only when devices or their discovery configs changed (and once after start); the service always sends it
 
 ## Device Mapping
 
@@ -102,6 +103,11 @@ State and commands follow Wiren Board convention:
 - **State**: `/devices/hite-pro/controls/{control_id}`
 - **Command**: `/devices/hite-pro/controls/{control_id}/on`
 - **Discovery**: `homeassistant/{domain}/{entity_id}/config`
+- **Relay-LED3S state (proxy)**: `hitepro/state/{control_id}` — see below
+
+### Relay-LED3S state filter
+
+The gateway answers `Reload` with a dump of its cache, and for Relay-LED3S modules that cache is unreliable: dim levels come back scaled down or as `0`, so a lit lamp would appear off. A genuine module answer always includes `{control_id}_temperatureMK` right after each channel value; a dump never does. The integration listens to the gateway topics and republishes a Relay-LED3S value to `hitepro/state/{control_id}` (retained) only when a `_temperatureMK` of the same module follows it within 1 second. Relay-LED3S lights read their state from that topic; commands still go to the gateway. A channel with no known value yet is seeded once from the first message so the entity does not stay `unknown`.
 
 ## Known Limitations
 

@@ -84,4 +84,8 @@ Entities are compared using `(domain, object_id)` tuples. This correctly detects
 
 ## Gateway Reload
 
-`async_trigger_reload()` publishes `"1"` to `/devices/hite-pro/controls/Reload/on`. This causes the gateway to push current states for all controls to MQTT, which HA then picks up. On first load (after HA restart), the Reload is **skipped** because states arrive before MQTT subscriptions are fully established. Subsequent periodic refreshes trigger Reload normally.
+`async_trigger_reload()` publishes `"1"` to `/devices/hite-pro/controls/Reload/on`. This causes the gateway to push current states for all controls to MQTT, which HA then picks up. On first load (after HA restart), the Reload is **skipped** because states arrive before MQTT subscriptions are fully established. Since 1.3.0 a periodic refresh triggers Reload only when the entity set or any discovery config changed, or on the first periodic refresh after start; `hitepro.refresh_devices` always does (`force_reload=True`).
+
+## Relay-LED3S state filter (1.3.0)
+
+`state_filter.py`: `StatePairing` (pure, no HA imports) and `LED3SStateFilter` (HA wrapper, started in `async_setup_entry`, stopped on unload, channel list updated on every refresh). It subscribes to `hitepro/state/+` (retained known values) and `/devices/hite-pro/controls/+`, holds Relay-LED3S channel values as pending and republishes them to `hitepro/state/<control_id>` (retain, qos 1) only when a `_temperatureMK` of the same module arrives after them within `PAIR_WINDOW` (1 s). Reload dumps carry no `_temperatureMK` and are dropped. Discovery points `state_topic`/`brightness_state_topic` of Relay-LED3S `range` lights to the proxy topic.
