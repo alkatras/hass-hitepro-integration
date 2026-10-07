@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.0 (2026-10-07)
+
+### Fixed
+
+- **Relay-LED3S lights shown off or dimmer after a gateway Reload**: the gateway answers Reload with a dump of its own cache, and for Relay-LED3S modules that cache is wrong — dim levels come back scaled down or as `0` (observed 32→2, 40→15, 60→43, 85→78, 100→100), and after an unanswered command the cache is reset to `0`. Home Assistant then showed lit lamps as off, scenes skipped them as "already off", and automations took the later correction for a manual switch-on. Relay-LED3S lights now read their state from a proxy topic `hitepro/state/<control_id>` that carries only genuine module answers: a channel value is republished only when a `<channel>_temperatureMK` of the same module follows it within 1 s (real answers always carry it, dumps never do). Replayed on 11 days of gateway traffic (352 Reloads): states wrong 30 s after a Reload went from 290 to 0. Commands still go to the gateway topics; the proxy prefix is outside `/devices/hite-pro/#`, so the gateway never sees it.
+
+### Changed
+
+- **Periodic refresh no longer sends Reload every time**: Reload is sent only when the device set or a discovery config changed, on the first periodic refresh after start (initial state sync, as before), or when `hitepro.refresh_devices` is called.
+
 ## 1.2.1 (2026-08-23)
 
 ### Fixed

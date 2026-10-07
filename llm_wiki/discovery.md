@@ -5,7 +5,7 @@
 | Wiren Board Type | HA Domain | Notes |
 |---|---|---|
 | `switch` | `switch` | On/off relay control |
-| `range` | `light` | Dimmer with brightness |
+| `range` | `light` | Dimmer with brightness (Relay-LED3S: state from `hitepro/state/<control_id>`, see architecture.md) |
 | `temperature` | `sensor` | °C, `state_class: measurement` |
 | `rel_humidity` | `sensor` | %, `state_class: measurement` |
 | `alarm` | `binary_sensor` | Device class inferred from ID/title |

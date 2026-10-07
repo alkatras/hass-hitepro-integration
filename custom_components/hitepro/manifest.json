@@ -1,17 +1,29 @@
 {
   "domain": "hitepro",
   "name": "HiTE PRO",
-  "codeowners": ["illmouse"],
+  "codeowners": [
+    "illmouse"
+  ],
   "config_flow": true,
-  "dependencies": ["mqtt"],
-  "documentation": "https://github.com/illmouse/hass-hitepro-integration",
+  "dependencies": [
+    "mqtt"
+  ],
+  "documentation": "https://github.com/alkatras/hass-hitepro-integration",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/illmouse/hass-hitepro-integration/issues",
+  "issue_tracker": "https://github.com/alkatras/hass-hitepro-integration/issues",
   "requirements": [],
   "zeroconf": [
-    {"type": "_hitepro._tcp.local.", "properties": {"model": "hitepro-gateway"}},
-    {"type": "_http._tcp.local.", "name": "hitepro*"}
+    {
+      "type": "_hitepro._tcp.local.",
+      "properties": {
+        "model": "hitepro-gateway"
+      }
+    },
+    {
+      "type": "_http._tcp.local.",
+      "name": "hitepro*"
+    }
   ],
-  "version": "1.2.1"
+  "version": "1.3.0"
 }

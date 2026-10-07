@@ -9,6 +9,7 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from .const import WB_CTRL_TOPIC, WB_DEVICE
+from .state_filter import is_filtered_control, proxy_topic
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -224,6 +225,9 @@ def _make_entity(
         )
 
     elif ha_domain == "light" and wb_type == "range":
+        if is_filtered_control(control_id):
+            # Reload dumps report wrong LED3S levels; read confirmed answers only.
+            state_topic = proxy_topic(control_id)
         payload["command_topic"] = command_topic
         payload["state_topic"] = state_topic
         payload["state_value_template"] = _range_state_template(str(max_val if max_val is not None else 100))
