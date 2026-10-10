@@ -8,7 +8,7 @@ HiTE PRO integration for Home Assistant. Discovers HiTE PRO gateways via mDNS, f
 - **Domain**: `hitepro`
 - **HA dependency**: MQTT integration
 - **Entity creation**: purely via MQTT discovery — `PLATFORMS = []`, no `async_forward_entry_setups`
-- **Current version**: 1.3.0
+- **Current version**: 1.3.1
 
 ## Key Files
 
