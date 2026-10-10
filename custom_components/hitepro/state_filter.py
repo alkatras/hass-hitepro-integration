@@ -13,12 +13,17 @@ arrive a second after a real answer. So a channel value is republished only
 when a ``_temperatureMK`` of the same module arrives *after* it within
 ``PAIR_WINDOW`` seconds. Lights of filtered channels read their state from the
 proxy topic instead of the gateway topic.
+
+The filter recognises channels by their control id alone, so it works even
+when the gateway config could not be fetched at start (the lights then still
+exist from retained discovery configs).
 """
 from __future__ import annotations
 
 import logging
+import re
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Any
 
 from .const import LED3S_PREFIX, PROXY_STATE_PREFIX, WB_CTRL_TOPIC
@@ -27,6 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PAIR_WINDOW = 1.0
 TEMP_SUFFIX = "_temperatureMK"
+_CHANNEL_RE = re.compile(rf"^{re.escape(LED3S_PREFIX)}[^_]+_\d+$")
 
 
 def module_of(control_id: str) -> str:
@@ -39,19 +45,16 @@ def proxy_topic(control_id: str) -> str:
 
 
 def is_filtered_control(control_id: str) -> bool:
-    return control_id.startswith(LED3S_PREFIX) and not control_id.endswith(TEMP_SUFFIX)
+    """A Relay-LED3S channel value, e.g. Relay-LED3S_AA42FCF1_2."""
+    return bool(_CHANNEL_RE.match(control_id))
 
 
 class StatePairing:
     """Pure pairing logic, no Home Assistant imports (testable on a journal)."""
 
-    def __init__(self, channels: Iterable[str] = ()) -> None:
-        self.channels: set[str] = set(channels)
+    def __init__(self) -> None:
         self.known: dict[str, str] = {}
         self._pending: dict[str, list[tuple[float, str, str]]] = {}
-
-    def set_channels(self, channels: Iterable[str]) -> None:
-        self.channels = set(channels)
 
     def set_known(self, control_id: str, value: str) -> None:
         self.known[control_id] = value
@@ -76,14 +79,14 @@ class StatePairing:
 
         if control_id.endswith(TEMP_SUFFIX):
             base = control_id[: -len(TEMP_SUFFIX)]
-            if base not in self.channels:
+            if not is_filtered_control(base):
                 return out
             module = module_of(base)
             for _t, pending_id, pending_value in self._pending.pop(module, []):
                 self._emit(pending_id, pending_value, out)
             return out
 
-        if control_id not in self.channels:
+        if not is_filtered_control(control_id):
             return out
 
         module = module_of(control_id)
@@ -103,9 +106,6 @@ class LED3SStateFilter:
         self._hass = hass
         self._pairing = StatePairing()
         self._unsubs: list[Callable[[], None]] = []
-
-    def set_channels(self, channels: Iterable[str]) -> None:
-        self._pairing.set_channels(channels)
 
     async def async_start(self) -> None:
         from homeassistant.components import mqtt
@@ -130,7 +130,7 @@ class LED3SStateFilter:
         # Proxy first: its retained values tell which channels are already known.
         self._unsubs.append(await mqtt.async_subscribe(self._hass, f"{PROXY_STATE_PREFIX}/+", _proxy_received, qos=1))
         self._unsubs.append(await mqtt.async_subscribe(self._hass, f"{WB_CTRL_TOPIC}/+", _gateway_received, qos=0))
-        _LOGGER.info("LED3S state filter started for %d channels", len(self._pairing.channels))
+        _LOGGER.info("LED3S state filter started")
 
     def async_stop(self) -> None:
         for unsub in self._unsubs:

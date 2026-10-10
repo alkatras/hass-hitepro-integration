@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 (2026-10-10)
+
+### Fixed
+
+- **Relay-LED3S lights frozen after a failed start**: the state filter took its channel list from the gateway config, so when the config fetch failed at Home Assistant start (gateway busy or unreachable) the filter ran with no channels and dropped every Relay-LED3S answer. The lights still existed from retained discovery configs but kept their old state until the next periodic refresh, up to `scan_interval` later. The filter now recognises channels by control id (`Relay-LED3S_<serial>_<n>`) and starts before the config fetch. Replayed on 14 days of gateway traffic (358 Reloads): 0 wrong states, same as 1.3.0 with a loaded config; 1.3.0 with an empty channel list got all 3837 checks wrong.
+- **No retry after a failed start**: a failed config fetch at start is now retried every 90 s until it succeeds, instead of waiting for the periodic refresh.
+
 ## 1.3.0 (2026-10-07)
 
 ### Fixed

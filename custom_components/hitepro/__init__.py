@@ -9,7 +9,7 @@ import ssl
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import CONF_API_KEY, CONF_LIGHT_DEVICES, CONF_URL, DEFAULT_SCAN_INTERVAL, DOMAIN, SERVICE_REFRESH
 from .discovery import (
@@ -24,9 +24,14 @@ from .discovery import (
 )
 
 from .discovery import CLEANUP_VERSION
-from .state_filter import LED3SStateFilter, is_filtered_control
+from .state_filter import LED3SStateFilter
 
 _LOGGER = logging.getLogger(__name__)
+
+# A failed config fetch at start leaves the integration without entities
+# until the next periodic refresh (scan_interval, often an hour). Retry
+# sooner until the first fetch succeeds.
+START_RETRY_SECONDS = 90
 
 PLATFORMS: list[str] = []
 
@@ -39,6 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "cleanup_version": 0,
         "periodic_reload_done": False,
         "state_filter": LED3SStateFilter(hass),
+        "retry_unsub": None,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -49,8 +55,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, SERVICE_REFRESH, handle_refresh)
 
-    await _async_refresh_entry(hass, entry)
+    # The filter does not depend on the gateway config: start it first, so a
+    # failed fetch below does not leave Relay-LED3S lights without state.
     await hass.data[DOMAIN][entry.entry_id]["state_filter"].async_start()
+    if not await _async_refresh_entry(hass, entry):
+        _schedule_start_retry(hass, entry)
     _start_refresh_timer(hass, entry)
 
     entry.async_on_unload(
@@ -69,6 +78,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unsub = data.get("unsub")
     if unsub:
         unsub()
+    retry_unsub = data.get("retry_unsub")
+    if retry_unsub:
+        retry_unsub()
 
     state_filter: LED3SStateFilter | None = data.get("state_filter")
     if state_filter:
@@ -106,6 +118,22 @@ def _start_refresh_timer(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.data[DOMAIN][entry.entry_id]["unsub"] = unsub
 
 
+def _schedule_start_retry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    data = hass.data[DOMAIN].get(entry.entry_id)
+    if data is None:
+        return
+    _LOGGER.warning("HiTE PRO config not loaded, retrying in %ds", START_RETRY_SECONDS)
+
+    async def _retry(_now) -> None:
+        data["retry_unsub"] = None
+        if data.get("entities"):
+            return  # a periodic refresh or the service already loaded it
+        if not await _async_refresh_entry(hass, entry):
+            _schedule_start_retry(hass, entry)
+
+    data["retry_unsub"] = async_call_later(hass, START_RETRY_SECONDS, _retry)
+
+
 def _entities_signature(entities: list[HiteEntity]) -> dict[tuple[str, str], str]:
     return {(e.domain, e.object_id): json.dumps(e.config, sort_keys=True, ensure_ascii=False) for e in entities}
 
@@ -116,7 +144,8 @@ async def _async_refresh_entry(
     *,
     periodic: bool = False,
     force_reload: bool = False,
-) -> None:
+) -> bool:
+    """Fetch the gateway config and publish discovery. False if the fetch failed."""
     _LOGGER.info("Refreshing entry %s", entry.entry_id)
     url: str = entry.data.get(CONF_URL, "")
     api_key: str = entry.data.get(CONF_API_KEY, "")
@@ -126,13 +155,13 @@ async def _async_refresh_entry(
         config_text = await _async_fetch_config(full_url)
     except Exception as err:
         _LOGGER.error("Failed to fetch HiTE PRO config: %s", err)
-        return
+        return False
 
     try:
         data = parse_hitepro_js(config_text)
     except Exception as err:
         _LOGGER.error("Failed to parse HiTE PRO config: %s", err)
-        return
+        return False
 
     cells = data.get("cells", {})
     url: str = entry.data.get(CONF_URL, "")
@@ -161,12 +190,6 @@ async def _async_refresh_entry(
 
     await async_publish_discovery(hass, new_entities)
 
-    state_filter: LED3SStateFilter | None = data_store.get("state_filter")
-    if state_filter:
-        state_filter.set_channels(
-            e.control_id for e in new_entities if e.domain == "light" and is_filtered_control(e.control_id)
-        )
-
     # Reload makes the gateway dump its cache, and that cache lies about
     # Relay-LED3S levels. Send it only when the device set or a discovery
     # config changed, on the first periodic refresh after start (initial
@@ -190,6 +213,7 @@ async def _async_refresh_entry(
         len(removed),
         len(cleanup_entities),
     )
+    return True
 
 
 async def _async_fetch_config(url: str) -> str:

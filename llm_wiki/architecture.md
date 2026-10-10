@@ -48,6 +48,9 @@ hass.data[DOMAIN][entry.entry_id] = {
     "entities": list[HiteEntity],    # current entity set
     "unsub": Callable,               # timer unsubscribe callback
     "cleanup_version": int,          # last run cleanup version
+    "periodic_reload_done": bool,    # first periodic Reload already sent
+    "state_filter": LED3SStateFilter,
+    "retry_unsub": Callable | None,  # pending start retry (1.3.1)
 }
 ```
 
@@ -77,6 +80,7 @@ Only one gateway instance is allowed. Enforced via:
 - `_start_refresh_timer()` uses `async_track_time_interval` with configurable `scan_interval` (default 300s, minimum 60s)
 - Timer is cancelled on `async_unload_entry`
 - Timer is restarted on options update via `_async_options_updated`
+- `_async_refresh_entry()` returns False when the config fetch or parse fails. If that happens at start, `_schedule_start_retry()` retries every `START_RETRY_SECONDS` (90 s) via `async_call_later` until a fetch succeeds or entities appear; the pending retry is cancelled on unload (1.3.1)
 
 ## Entity Diffing
 
@@ -88,4 +92,4 @@ Entities are compared using `(domain, object_id)` tuples. This correctly detects
 
 ## Relay-LED3S state filter (1.3.0)
 
-`state_filter.py`: `StatePairing` (pure, no HA imports) and `LED3SStateFilter` (HA wrapper, started in `async_setup_entry`, stopped on unload, channel list updated on every refresh). It subscribes to `hitepro/state/+` (retained known values) and `/devices/hite-pro/controls/+`, holds Relay-LED3S channel values as pending and republishes them to `hitepro/state/<control_id>` (retain, qos 1) only when a `_temperatureMK` of the same module arrives after them within `PAIR_WINDOW` (1 s). Reload dumps carry no `_temperatureMK` and are dropped. Discovery points `state_topic`/`brightness_state_topic` of Relay-LED3S `range` lights to the proxy topic.
+`state_filter.py`: `StatePairing` (pure, no HA imports) and `LED3SStateFilter` (HA wrapper, started in `async_setup_entry` before the first config fetch, stopped on unload; since 1.3.1 it recognises channels by control id `Relay-LED3S_<serial>_<n>` and needs no channel list from the gateway config). It subscribes to `hitepro/state/+` (retained known values) and `/devices/hite-pro/controls/+`, holds Relay-LED3S channel values as pending and republishes them to `hitepro/state/<control_id>` (retain, qos 1) only when a `_temperatureMK` of the same module arrives after them within `PAIR_WINDOW` (1 s). Reload dumps carry no `_temperatureMK` and are dropped. Discovery points `state_topic`/`brightness_state_topic` of Relay-LED3S `range` lights to the proxy topic.
